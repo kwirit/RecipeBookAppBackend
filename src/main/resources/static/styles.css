@@ -153,3 +153,147 @@ select.form-control { cursor: pointer; }
         display: none; /* Скрываем фото на маленьких экранах */
     }
 }
+
+
+/* 🔹 Кнопки конфликтов — аккуратные "теги" */
+.conflict-dishes-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border, #e0e0e0);
+}
+
+.dish-conflict-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: var(--primary, #4f46e5);
+    color: white;
+    text-decoration: none;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: opacity 0.2s, transform 0.1s;
+}
+
+.dish-conflict-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.dish-conflict-btn:active {
+    transform: translateY(0);
+}
+
+/* 🔹 Улучшения для модального окна */
+#confirm-modal .modal-content {
+    max-width: 480px;
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+#confirm-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text, #1f2937);
+}
+
+#confirm-message {
+    color: var(--text-muted, #6b7280);
+    line-height: 1.5;
+}
+
+/* 🔹 Адаптивность */
+@media (max-width: 640px) {
+    .conflict-dishes-list {
+        justify-content: center;
+    }
+    .dish-conflict-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* 🔹 Список конфликтов — аккуратный и некликабельный */
+.conflict-dishes-list {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.conflict-dish-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-soft, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    font-size: 0.95rem;
+}
+
+.conflict-dish-item .dish-name {
+    font-weight: 500;
+    color: var(--text, #1f2937);
+}
+
+.conflict-dish-item .dish-category {
+    font-size: 0.85rem;
+    color: var(--text-muted, #6b7280);
+    background: var(--bg-muted, #f1f5f9);
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+/* 🔹 Скроллбар для списка */
+.conflict-dishes-list::-webkit-scrollbar {
+    width: 6px;
+}
+.conflict-dishes-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.conflict-dishes-list::-webkit-scrollbar-thumb {
+    background: var(--border, #cbd5e1);
+    border-radius: 3px;
+}
+.conflict-dishes-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted, #94a3b8);
+}
+
+/* 🔹 Адаптивность */
+@media (max-width: 640px) {
+    .conflict-dish-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    .conflict-dish-item .dish-category {
+        align-self: flex-start;
+    }
+}
+/* 🔹 Улучшение для detail-meta с датами */
+.detail-meta {
+    font-size: 0.9rem;
+    color: var(--text-muted, #6b7280);
+    line-height: 1.6;
+}
+
+.detail-meta small {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.85rem;
+}
+
+/* 🔹 Адаптивность: перенос дат на новую строку на мобильных */
+@media (max-width: 640px) {
+    .detail-meta {
+        font-size: 0.85rem;
+    }
+}

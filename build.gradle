@@ -21,6 +21,9 @@ repositories {
 
 ext {
     set('snippetsDir', file("build/generated-snippets"))
+    // Опционально: можно управлять версией testcontainers вручную,
+    // но Spring Boot Dependency Management обычно подтягивает совместимую версию.
+    // set('testcontainersVersion', '1.19.8')
 }
 
 dependencies {
@@ -38,17 +41,32 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
-    // 🔍 DevTools (опционально, для горячей перезагрузки в IDE)
+    // 🔍 DevTools
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
     // 🧪 Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // 🐳 Testcontainers Support
+    // 1. Основной модуль для Spring Boot интеграции
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+
+    // 2. Модуль для конкретного контейнера (PostgreSQL)
+    testImplementation 'org.testcontainers:postgresql'
+
+    // 3. Модуль для JUnit 5 интеграции (@Container, @ServiceConnection)
+    testImplementation 'org.testcontainers:junit-jupiter'
+
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
     outputs.dir snippetsDir
     useJUnitPlatform()
+
+    // Важно для Testcontainers: увеличиваем время ожидания, если контейнеры долго стартуют
+    // и передаем свойства, если нужно
+    systemProperty 'testcontainers.reuse.enable', 'true' // Опционально: переиспользование контейнеров
 }
 
 tasks.named('asciidoctor') {

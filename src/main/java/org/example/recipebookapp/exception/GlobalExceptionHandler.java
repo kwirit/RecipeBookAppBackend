@@ -33,7 +33,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleProductInUse(ProductInUseException ex) {
         Map<String, Object> body = new HashMap<>();
         body.put("error", ex.getMessage());
-        body.put("dishes", ex.getDishNames());
+        body.put("dishes", ex.getConflictingDishes());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 

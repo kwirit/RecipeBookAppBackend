@@ -10,6 +10,7 @@ import org.example.recipebookapp.database.entity.DishIngredient;
 import org.example.recipebookapp.database.entity.Product;
 import org.example.recipebookapp.database.entity.enums.DishCategory;
 import org.example.recipebookapp.database.entity.enums.NutritionFlag;
+import org.example.recipebookapp.database.repository.DishIngredientRepository;
 import org.example.recipebookapp.database.repository.DishRepository;
 import org.example.recipebookapp.database.repository.ProductRepository;
 import org.example.recipebookapp.exception.ProductInUseException;
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 public class DishService {
     private final DishRepository dishRepository;
     private final ProductRepository productRepository;
+    private final DishIngredientRepository dishIngredientRepository;
 
     private static final Pattern MACRO_PATTERN = Pattern.compile("!(десерт|первое|второе|напиток|салат|суп|перекус)", Pattern.CASE_INSENSITIVE);
     private static final Map<String, DishCategory> MACRO_MAP = Map.of(
@@ -48,11 +50,23 @@ public class DishService {
         Matcher m = MACRO_PATTERN.matcher(name);
         String cleanedName = name;
         DishCategory detected = null;
+
+        // 🔹 Находим ПЕРВЫЙ макрос по позиции для определения категории
         if (m.find()) {
             String macro = m.group(1).toLowerCase();
             detected = MACRO_MAP.get(macro);
-            cleanedName = name.replaceFirst(Pattern.quote(m.group(0)), "").trim();
         }
+
+        // 🔹 Удаляем ВСЕ макросы с помощью replaceAll (не replaceFirst!)
+        cleanedName = MACRO_PATTERN.matcher(name).replaceAll("");
+
+        // 🔹 Нормализация пробелов и удаление осиротевших восклицательных знаков
+        cleanedName = cleanedName
+                .replaceAll("\\s{2,}", " ")  // несколько пробелов → один
+                .replaceAll("\\s*!\\s*", " ") // ! с пробелами вокруг → пробел
+                .replaceAll("!", "")          // оставшиеся одиночные !
+                .trim();
+
         return new String[]{cleanedName, detected != null ? detected.name() : null};
     }
 
@@ -67,19 +81,40 @@ public class DishService {
     }
 
     private void calculateKbzhuDish(Dish dish) {
-        double cal = 0, prot = 0, fat = 0, carb = 0;
+        double totalCal = 0, totalProt = 0, totalFat = 0, totalCarb = 0;
+        double totalWeight = 0;
+
+        // 1. Считаем абсолютные значения и общий вес всех ингредиентов
         for (DishIngredient ing : dish.getIngredients()) {
             Product p = ing.getProduct();
-            double ratio = ing.getQuantityInGrams() / 100.0;
-            cal += p.getCalories() * ratio;
-            prot += p.getProteins() * ratio;
-            fat += p.getFats() * ratio;
-            carb += p.getCarbs() * ratio;
+            double weight = ing.getQuantityInGrams();
+            double ratio = weight / 100.0;
+
+            totalCal += p.getCalories() * ratio;
+            totalProt += p.getProteins() * ratio;
+            totalFat += p.getFats() * ratio;
+            totalCarb += p.getCarbs() * ratio;
+            totalWeight += weight;
         }
-        dish.setCalories(Math.round(cal * 100.0) / 100.0);
-        dish.setProteins(Math.round(prot * 100.0) / 100.0);
-        dish.setFats(Math.round(fat * 100.0) / 100.0);
-        dish.setCarbs(Math.round(carb * 100.0) / 100.0);
+
+        Double portionSize = dish.getPortionSize();
+
+        // 2. Рассчитываем КБЖУ на порцию
+        // Формула: (Абсолютное значение / Общий вес ингредиентов) * Размер порции
+        if (totalWeight > 0 && portionSize != null && portionSize > 0) {
+            double portionFactor = portionSize / totalWeight;
+
+            dish.setCalories(Math.round(totalCal * portionFactor * 100.0) / 100.0);
+            dish.setProteins(Math.round(totalProt * portionFactor * 100.0) / 100.0);
+            dish.setFats(Math.round(totalFat * portionFactor * 100.0) / 100.0);
+            dish.setCarbs(Math.round(totalCarb * portionFactor * 100.0) / 100.0);
+        } else {
+            // Защита от деления на ноль или некорректной порции
+            dish.setCalories(0.0);
+            dish.setProteins(0.0);
+            dish.setFats(0.0);
+            dish.setCarbs(0.0);
+        }
     }
 
     private DishResponseDto toDto(Dish d) {
@@ -121,25 +156,33 @@ public class DishService {
                 .category(finalCategory)
                 .build();
 
-        List<DishIngredient> ingredients = new ArrayList<>();
+        dish.getIngredients().clear();
         for (DishCreateDto.IngredientDto iDto : dto.getIngredients()) {
             Product product = productRepository.findById(iDto.getProductId())
-                    .orElseThrow(() -> new EntityNotFoundException("Продукт ID " + iDto.getProductId() + " не найден"));
-            ingredients.add(DishIngredient.builder().dish(dish).product(product).quantityInGrams(iDto.getQuantityInGrams()).build());
+                    .orElseThrow(() -> new EntityNotFoundException("Продукт не найден"));
+
+            // 🔹 Используем addIngredient() для автоматической установки связи
+            DishIngredient ingredient = DishIngredient.builder()
+                    .product(product)
+                    .quantityInGrams(iDto.getQuantityInGrams())
+                    .build();
+
+            dish.addIngredient(ingredient);  // ✅ ingredient.setDish(dish) вызывается внутри
         }
-        dish.setIngredients(ingredients);
 
         calculateKbzhuDish(dish);
+
         // Разрешаем ручную корректировку, если переданы
         if (dto.getCalories() != null) dish.setCalories(dto.getCalories());
         if (dto.getProteins() != null) dish.setProteins(dto.getProteins());
         if (dto.getFats() != null) dish.setFats(dto.getFats());
         if (dto.getCarbs() != null) dish.setCarbs(dto.getCarbs());
 
-        validateBjuPer100g(dish.getProteins(), dish.getFats(), dish.getCarbs(), dish.getPortionSize());
-
         Set<NutritionFlag> allowed = computeAllowedFlags(dish.getIngredients());
-        Set<NutritionFlag> requested = dto.getFlags() != null ? new HashSet<>(dto.getFlags()) : new HashSet<>();
+        Set<NutritionFlag> requested = new HashSet<>();
+        if (dto.getFlags() != null) {
+            requested.addAll(dto.getFlags());
+        }
         requested.retainAll(allowed);
         dish.setFlags(requested);
 
@@ -160,8 +203,10 @@ public class DishService {
 
     @Transactional
     public DishResponseDto update(Long id, DishCreateDto dto) {
-        Dish dish = dishRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Блюдо не найдено"));
+        Dish dish = dishRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Блюдо не найдено"));
 
+        // Обновление основных полей
         String[] parsed = parseMacro(dto.getName());
         dish.setName(parsed[0]);
         dish.setCategory(dto.getCategory() != null ? dto.getCategory() :
@@ -170,22 +215,48 @@ public class DishService {
         dish.setPortionSize(dto.getPortionSize());
 
         dish.getIngredients().clear();
+
         for (DishCreateDto.IngredientDto iDto : dto.getIngredients()) {
             Product product = productRepository.findById(iDto.getProductId())
-                    .orElseThrow(() -> new EntityNotFoundException("Продукт ID " + iDto.getProductId() + " не найден"));
-            dish.addIngredient(DishIngredient.builder().product(product).quantityInGrams(iDto.getQuantityInGrams()).build());
+                    .orElseThrow(() -> new EntityNotFoundException("Продукт не найден"));
+
+            // 🔹 Проверяем, не существует ли уже такая связь
+            Optional<DishIngredient> existing = dishIngredientRepository
+                    .findByDishIdAndProductId(dish.getId(), product.getId());
+
+            DishIngredient ingredient;
+            if (existing.isPresent()) {
+                // Обновляем существующую запись
+                ingredient = existing.get();
+                ingredient.setQuantityInGrams(iDto.getQuantityInGrams());
+            } else {
+                // Создаём новую
+                ingredient = DishIngredient.builder()
+                        .dish(dish)
+                        .product(product)
+                        .quantityInGrams(iDto.getQuantityInGrams())
+                        .build();
+            }
+
+            // Добавляем в коллекцию, если ещё не добавлен
+            if (!dish.getIngredients().contains(ingredient)) {
+                dish.addIngredient(ingredient);
+            }
         }
 
+        // Пересчёт КБЖУ
         calculateKbzhuDish(dish);
         if (dto.getCalories() != null) dish.setCalories(dto.getCalories());
         if (dto.getProteins() != null) dish.setProteins(dto.getProteins());
         if (dto.getFats() != null) dish.setFats(dto.getFats());
         if (dto.getCarbs() != null) dish.setCarbs(dto.getCarbs());
 
-        validateBjuPer100g(dish.getProteins(), dish.getFats(), dish.getCarbs(), dish.getPortionSize());
-
+        // Флаги
         Set<NutritionFlag> allowed = computeAllowedFlags(dish.getIngredients());
-        Set<NutritionFlag> requested = dto.getFlags() != null ? new HashSet<>(dto.getFlags()) : new HashSet<>();
+        Set<NutritionFlag> requested = new HashSet<>();
+        if (dto.getFlags() != null) {
+            requested.addAll(dto.getFlags());
+        }
         requested.retainAll(allowed);
         dish.setFlags(requested);
 
@@ -202,8 +273,7 @@ public class DishService {
     public void checkProductUsage(Long productId) {
         List<Dish> dishes = dishRepository.findByIngredients_ProductId(productId);
         if (!dishes.isEmpty()) {
-            List<String> names = dishes.stream().map(Dish::getName).collect(Collectors.toList());
-            throw new ProductInUseException(names);
+            throw new ProductInUseException(dishes);
         }
     }
 }

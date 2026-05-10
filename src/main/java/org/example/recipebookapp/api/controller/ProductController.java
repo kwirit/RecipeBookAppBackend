@@ -8,9 +8,13 @@ import org.example.recipebookapp.api.dto.ProductResponseDto;
 import org.example.recipebookapp.api.dto.ProductResponseDto;
 import org.example.recipebookapp.core.service.DishService;
 import org.example.recipebookapp.core.service.ProductService;
+import org.example.recipebookapp.exception.ProductInUseException;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/products")
@@ -42,9 +46,17 @@ public class ProductController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        dishService.checkProductUsage(id); // Проверка перед удалением
-        productService.delete(id);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> delete(@PathVariable Long id) {
+        try {
+            dishService.checkProductUsage(id); // Проверка перед удалением
+            productService.delete(id);
+            return ResponseEntity.noContent().build();
+        } catch (ProductInUseException e) {
+            // 🔹 Возвращаем 409 с деталями конфликта
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", e.getMessage());
+            body.put("conflictingDishes", e.getConflictingDishes());
+            return ResponseEntity.status(409).body(body);
+        }
     }
 }
