@@ -703,24 +703,44 @@ async function renderProductForm(id = null) {
     }
 
     // Отправка формы
+    // Отправка формы продукта
     document.getElementById('product-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        let valid = true;
+
+        const errors = [];
         const name = document.getElementById('p-name');
+        const calories = document.getElementById('p-cal');
+        const proteins = document.getElementById('p-pro');
+        const fats = document.getElementById('p-fat');
+        const carbs = document.getElementById('p-carb');
+
+        // 🔹 Валидация имени
         if (name.value.trim().length < 2) {
+            errors.push('Название должно содержать минимум 2 символа');
             name.classList.add('is-invalid');
-            valid = false;
-        } else name.classList.remove('is-invalid');
-
-        const b = Number(document.getElementById('p-pro').value || 0);
-        const f = Number(document.getElementById('p-fat').value || 0);
-        const c = Number(document.getElementById('p-carb').value || 0);
-        if (b + f + c > 100) {
-            showToast(`Сумма БЖУ (${(b + f + c).toFixed(2)}) не может превышать 100г`, 'error');
-            valid = false;
+        } else {
+            name.classList.remove('is-invalid');
         }
-        if (!valid) return;
 
+        // 🔹 Валидация КБЖУ
+        const cal = Number(calories.value);
+        const pro = Number(proteins.value);
+        const fat = Number(fats.value);
+        const carb = Number(carbs.value);
+
+        if (cal < 0) errors.push('Калорийность не может быть отрицательной');
+        if (pro < 0 || pro > 100) errors.push('Белки должны быть от 0 до 100 г');
+        if (fat < 0 || fat > 100) errors.push('Жиры должны быть от 0 до 100 г');
+        if (carb < 0 || carb > 100) errors.push('Углеводы должны быть от 0 до 100 г');
+        if (pro + fat + carb > 100) errors.push('Сумма БЖУ не может превышать 100 г на 100 г продукта');
+
+        // 🔹 Если есть ошибки — показываем алёрт
+        if (errors.length > 0) {
+            await showValidationError('Продукт', errors);
+            return;
+        }
+
+        // 🔹 Сбор данных и отправка
         const flags = [];
         if (document.getElementById('p-vegan').checked) flags.push('VEGAN');
         if (document.getElementById('p-gluten').checked) flags.push('GLUTEN_FREE');
@@ -730,11 +750,13 @@ async function renderProductForm(id = null) {
             name: name.value,
             category: CATEGORY_MAP[document.getElementById('p-category').value] || null,
             cookingRequirement: document.getElementById('p-cooking').value,
-            calories: Number(document.getElementById('p-cal').value) || 0,
-            proteins: b, fats: f, carbs: c,
+            calories: cal,
+            proteins: pro,
+            fats: fat,
+            carbs: carb,
             composition: document.getElementById('p-comp').value,
             flags: flags,
-            photos: currentPhotos // ← Отправляем массив URL
+            photos: currentPhotos
         };
 
         try {
@@ -743,7 +765,14 @@ async function renderProductForm(id = null) {
             showToast(isEdit ? 'Продукт обновлен' : 'Продукт создан', 'success');
             location.hash = '#/products';
         } catch (err) {
-            showToast(err._global || Object.values(err).join(', ') || 'Ошибка сохранения', 'error');
+            // 🔹 Обработка ошибок от сервера (400)
+            if (err && typeof err === 'object' && !err._global) {
+                const serverErrors = Object.entries(err)
+                    .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`);
+                await showValidationError('Сервер', serverErrors);
+            } else {
+                showToast(err._global || 'Ошибка сохранения', 'error');
+            }
         }
     });
 }
@@ -770,8 +799,7 @@ async function renderProductDetail({id}) {
                             Категория: ${ruCategory} |
                             Готовка: ${ruCooking} |
                             Создано: ${formatDate(p.createdAt)}
-                            ${p.updatedAt ? ` | Обновлено: ${formatDate(p.updatedAt)}` : ''}
-                        </div>
+                            ${(p.updatedAt && formatDate(p.updatedAt) !== formatDate(p.createdAt)) ? ` | Обновлено: ${formatDate(p.updatedAt)}` : ''}                        </div>
                         <div class="flags">
                             ${hasFlag(p.flags, 'VEGAN') ? '<span class="flag-badge vegan">Веган</span>' : ''}
                             ${hasFlag(p.flags, 'GLUTEN_FREE') ? '<span class="flag-badge gluten-free">Без глютена</span>' : ''}
@@ -893,19 +921,26 @@ async function renderDishList() {
     `;
 
     const load = debounce(async () => {
+        // 🔹 Собираем флаги как массив enum-строк
         const flags = [];
         if (document.getElementById('d-filter-vegan').checked) flags.push('VEGAN');
         if (document.getElementById('d-filter-gluten').checked) flags.push('GLUTEN_FREE');
         if (document.getElementById('d-filter-sugar').checked) flags.push('SUGAR_FREE');
 
+        // 🔹 Преобразуем категорию из русской в enum
+        const ruCategory = document.getElementById('d-filter-category').value;
+        // Используем DISH_CATEGORY_MAP для конвертации "Суп" -> "SOUP"
+        const enCategory = DISH_CATEGORY_MAP[ruCategory] || null;
+
+        const nameSearch = document.getElementById('d-filter-name').value || null;
+
         const params = {
-            nameSearch: document.getElementById('d-filter-name').value || null,
-            category: document.getElementById('d-filter-category').value || null,
+            nameSearch: nameSearch,
+            category: enCategory,  // 🔹 Отправляем enum, а не русское название
             flags: flags.length > 0 ? flags : null,
             page: STATE.dishPage?.current || 1,
             size: 10
         };
-
 
         try {
             const res = await API.getDishes(params);
@@ -1092,13 +1127,6 @@ async function renderDishForm(id = null) {
                             <span id="info-fat-100">—</span> Ж |
                             <span id="info-carb-100">—</span> У
                         </div>
-                        <div>
-                            <strong>Всего (абсолютно):</strong><br>
-                            <span id="info-cal-abs">—</span> ккал |
-                            <span id="info-pro-abs">—</span> Б |
-                            <span id="info-fat-abs">—</span> Ж |
-                            <span id="info-carb-abs">—</span> У
-                        </div>
                     </div>
                 </div>
 
@@ -1132,9 +1160,10 @@ async function renderDishForm(id = null) {
     // 🔹 Расчёт КБЖУ
 // 🔹 Расчёт КБЖУ (абсолютные значения, без учёта порции)
 // 🔹 Расширенный расчёт КБЖУ: На 100г, На порцию, Абсолютное
+        // 🔹 Расчёт КБЖУ: Абсолютные значения (сумма всех ингредиентов)
     function recalculate() {
         let totalCal = 0, totalPro = 0, totalFat = 0, totalCarb = 0;
-        let totalWeight = 0; // Фактический вес всех ингредиентов
+        let totalWeight = 0;
 
         ingredients.forEach(ing => {
             const prod = STATE.productCache.find(p => String(p.id) === String(ing.productId));
@@ -1151,55 +1180,28 @@ async function renderDishForm(id = null) {
         const portionSize = Number(document.getElementById('d-portion')?.value) || 100;
         const hasIngredients = ingredients.some(i => i.productId && i.weight > 0);
 
-        // Форматирование
         const fmt = (val) => hasIngredients && val > 0.01 ? formatNum(val) : '—';
 
-        // 1. Расчет на 100г блюда
+        // 1. Расчет на 100г блюда (для инфо-блока)
         const calPer100 = totalWeight > 0 ? (totalCal / totalWeight) * 100 : 0;
         const proPer100 = totalWeight > 0 ? (totalPro / totalWeight) * 100 : 0;
         const fatPer100 = totalWeight > 0 ? (totalFat / totalWeight) * 100 : 0;
         const carbPer100 = totalWeight > 0 ? (totalCarb / totalWeight) * 100 : 0;
 
-        // 2. Расчет на порцию (пропорционально размеру порции относительно фактического веса или просто сумма, если порция = вес)
-        // Обычно "на порцию" значит: если блюдо весит 500г, а порция 250г, то берем половину.
-        // Но в ТЗ часто подразумевают, что ингредиенты указаны НА ОДНУ ПОРЦИЮ.
-        // Если ингредиенты — это состав всей кастрюли, а порция — это часть, то:
-        // Значение на порцию = (Значение абсолютное / totalWeight) * portionSize
-
-        const calPerPortion = totalWeight > 0 ? (totalCal / totalWeight) * portionSize : 0;
-        const proPerPortion = totalWeight > 0 ? (totalPro / totalWeight) * portionSize : 0;
-        const fatPerPortion = totalWeight > 0 ? (totalFat / totalWeight) * portionSize : 0;
-        const carbPerPortion = totalWeight > 0 ? (totalCarb / totalWeight) * portionSize : 0;
-
-        // 3. Абсолютные значения (сумма всех ингредиентов)
-        // Это то, что мы уже посчитали в totalCal/Pro/Fat/Carb
-
-        // 🔹 Обновляем поля формы
-        // По умолчанию сохраняем "На порцию" как основное значение блюда (как было ранее),
-        // но можно выводить все три варианта в интерфейс.
-
-        // Для совместимости с текущей логикой отправки на бэкенд,
-        // будем считать, что поля d-cal/d-pro и т.д. хранят значения НА ПОРЦИЮ.
-
+        // 🔹 Обновляем ОСНОВНЫЕ поля формы АБСОЛЮТНЫМИ значениями
         const setIfNotDirty = (id, val) => {
             const el = document.getElementById(id);
             const key = id.replace('d-', '');
             if (el && !STATE.isDirty[key]) el.value = fmt(val);
         };
 
-        // Сохраняем значения "На порцию" в основные поля
-        setIfNotDirty('d-cal', calPerPortion);
-        setIfNotDirty('d-pro', proPerPortion);
-        setIfNotDirty('d-fat', fatPerPortion);
-        setIfNotDirty('d-carb', carbPerPortion);
+        // Сохраняем абсолютные значения в основные поля
+        setIfNotDirty('d-cal', totalCal);
+        setIfNotDirty('d-pro', totalPro);
+        setIfNotDirty('d-fat', totalFat);
+        setIfNotDirty('d-carb', totalCarb);
 
-        // 🔹 Опционально: Вывод всех трех вариантов в консоль или в специальный блок UI
-        console.log('🔍 KBZU Calc:', {
-            per100g: { cal: calPer100, pro: proPer100, fat: fatPer100, carb: carbPer100 },
-            perPortion: { cal: calPerPortion, pro: proPerPortion, fat: fatPerPortion, carb: carbPerPortion },
-            absolute: { cal: totalCal, pro: totalPro, fat: totalFat, carb: totalCarb },
-            weights: { total: totalWeight, portion: portionSize }
-        });
+        // Заполняем информационные поля
         const setText = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.textContent = fmt(val);
@@ -1210,6 +1212,7 @@ async function renderDishForm(id = null) {
         setText('info-fat-100', fatPer100);
         setText('info-carb-100', carbPer100);
 
+        // В блоке "Всего" теперь дублируем абсолютные значения (так как они основные)
         setText('info-cal-abs', totalCal);
         setText('info-pro-abs', totalPro);
         setText('info-fat-abs', totalFat);
@@ -1508,40 +1511,62 @@ async function renderDishForm(id = null) {
     // ==========================================
     // ОТПРАВКА ФОРМЫ
     // ==========================================
+    // Отправка формы блюда
     document.getElementById('dish-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        let valid = true;
 
+        const errors = [];
         const nameVal = document.getElementById('d-name');
-        if (!nameVal.value.trim()) {
-            nameVal.classList.add('is-invalid');
-            valid = false;
-        } else nameVal.classList.remove('is-invalid');
-
         const portionVal = document.getElementById('d-portion');
-        if (Number(portionVal.value) <= 0) {
+
+        // 🔹 Валидация имени
+        if (!nameVal.value.trim()) {
+            errors.push('Название блюда обязательно');
+            nameVal.classList.add('is-invalid');
+        } else {
+            nameVal.classList.remove('is-invalid');
+        }
+
+        // 🔹 Валидация порции
+        const portion = Number(portionVal.value);
+        if (portion <= 0) {
+            errors.push('Размер порции должен быть больше 0');
             portionVal.classList.add('is-invalid');
-            valid = false;
-        } else portionVal.classList.remove('is-invalid');
-
-        if (ingredients.filter(i => i.productId && i.weight > 0).length === 0) {
-            showToast('Добавьте хотя бы один ингредиент', 'error');
-            valid = false;
+        } else {
+            portionVal.classList.remove('is-invalid');
         }
 
-        if (ingredients.filter(i => i.productId && i.weight > 0).length === 0) {
-            showToast('Добавьте хотя бы один ингредиент', 'error');
-            valid = false;
+        // 🔹 Валидация ингредиентов
+        const validIngredients = ingredients.filter(i => i.productId && i.weight > 0);
+        if (validIngredients.length === 0) {
+            errors.push('Добавьте хотя бы один ингредиент');
         }
-        if (!valid) return;
 
-        // Сбор флагов
+        // 🔹 Валидация КБЖУ (опционально, если пользователь редактировал вручную)
+        if (STATE.isDirty.calories || STATE.isDirty.proteins || STATE.isDirty.fats || STATE.isDirty.carbs) {
+            const cal = Number(document.getElementById('d-cal').value) || 0;
+            const pro = Number(document.getElementById('d-pro').value) || 0;
+            const fat = Number(document.getElementById('d-fat').value) || 0;
+            const carb = Number(document.getElementById('d-carb').value) || 0;
+
+            if (cal < 0) errors.push('Калорийность не может быть отрицательной');
+            if (pro < 0) errors.push('Белки не могут быть отрицательными');
+            if (fat < 0) errors.push('Жиры не могут быть отрицательными');
+            if (carb < 0) errors.push('Углеводы не могут быть отрицательными');
+        }
+
+        // 🔹 Если есть ошибки — показываем алёрт
+        if (errors.length > 0) {
+            await showValidationError('Блюдо', errors);
+            return;
+        }
+
+        // 🔹 Сбор данных и отправка
         const flags = [];
         if (document.getElementById('d-vegan').checked) flags.push('VEGAN');
         if (document.getElementById('d-gluten').checked) flags.push('GLUTEN_FREE');
         if (document.getElementById('d-sugar').checked) flags.push('SUGAR_FREE');
 
-        // Отправляем КБЖУ только если было ручное редактирование
         const isManualEdit = STATE.isDirty.calories || STATE.isDirty.proteins ||
                              STATE.isDirty.fats || STATE.isDirty.carbs;
         const parseKbzhu = (id) => {
@@ -1557,14 +1582,12 @@ async function renderDishForm(id = null) {
             category: (selectedCategory && selectedCategory !== 'Авто')
                 ? DISH_CATEGORY_MAP[selectedCategory]
                 : undefined,
-            portionSize: Number(portionVal.value),
+            portionSize: portion,
             photos: currentPhotos,
-            ingredients: ingredients
-                .filter(i => i.productId && i.weight > 0)
-                .map(i => ({
-                    productId: i.productId,
-                    quantityInGrams: i.weight
-                })),
+            ingredients: validIngredients.map(i => ({
+                productId: i.productId,
+                quantityInGrams: i.weight
+            })),
             calories: isManualEdit ? parseKbzhu('d-cal') : null,
             proteins: isManualEdit ? parseKbzhu('d-pro') : null,
             fats: isManualEdit ? parseKbzhu('d-fat') : null,
@@ -1578,13 +1601,59 @@ async function renderDishForm(id = null) {
             showToast(isEdit ? 'Блюдо обновлено' : 'Блюдо создано', 'success');
             location.hash = '#/dishes';
         } catch (err) {
-            showToast(err._global || 'Ошибка сохранения', 'error');
+            if (err && typeof err === 'object' && !err._global) {
+                const serverErrors = Object.entries(err)
+                    .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`);
+                await showValidationError('Сервер', serverErrors);
+            } else {
+                showToast(err._global || 'Ошибка сохранения', 'error');
+            }
         }
     });
 
     // 🔹 Финальный рендер
     renderIngredients();
 }
+
+// 🔹 Алёрт для ошибок валидации формы
+const showValidationError = (fieldLabel, errors) => new Promise(resolve => {
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-title');
+    const messageEl = document.getElementById('confirm-message');
+    const extraEl = document.getElementById('confirm-extra');
+    const okBtn = document.getElementById('confirm-ok');
+    const cancelBtn = document.getElementById('confirm-cancel');
+
+    // 🔹 Формируем сообщение об ошибках
+    const errorList = Array.isArray(errors)
+        ? errors.map(e => `<li>${e}</li>`).join('')
+        : `<li>${errors}</li>`;
+
+    // 🔹 Настройка контента
+    titleEl.textContent = '⚠️ Ошибка валидации';
+    messageEl.innerHTML = `Поле <strong>"${fieldLabel}"</strong> содержит ошибки:<br><ul style="margin:0.5rem 0 0 1.5rem;padding:0;text-align:left">${errorList}</ul>`;
+    extraEl.innerHTML = '';
+
+    // 🔹 Показываем только кнопку "Понятно"
+    okBtn.classList.add('hidden');
+    cancelBtn.textContent = 'Понятно';
+    cancelBtn.className = 'btn btn-primary';
+
+    // 🔹 Показываем модальное окно
+    modal.classList.remove('hidden');
+
+    // 🔹 Обработчик закрытия
+    const onClose = () => {
+        modal.classList.add('hidden');
+        okBtn.classList.remove('hidden');
+        cancelBtn.textContent = 'Отмена';
+        cancelBtn.className = 'btn btn-secondary';
+        resolve();
+    };
+
+    cancelBtn.onclick = onClose;
+    modal.onclick = (e) => { if (e.target === modal) onClose(); };
+});
 
 // ==========================================
 // DISH DETAIL
@@ -1634,7 +1703,7 @@ async function renderDishDetail({id}) {
                     <div>
                         <h2>${d.name}</h2>
                         <div class="detail-meta">Категория: ${EN_TO_RU_DISH_CATEGORY[d.category] || d.category || '—'} | Порция: ${d.portionSize} г | Создано: ${formatDate(d.createdAt)}
-                            ${d.updatedAt ? ` | Обновлено: ${formatDate(d.updatedAt)}` : ''}
+                            ${(d.updatedAt && formatDate(d.updatedAt) !== formatDate(d.createdAt)) ? ` | Обновлено: ${formatDate(d.updatedAt)}` : ''}                        </div>
                         </div>
                         <div class="flags">
                             ${hasFlag(d.flags, 'VEGAN') ? '<span class="flag-badge vegan">Веган</span>' : ''}

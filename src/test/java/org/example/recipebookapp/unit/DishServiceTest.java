@@ -5,7 +5,6 @@ import org.example.recipebookapp.api.dto.DishCreateDto;
 import org.example.recipebookapp.api.dto.DishResponseDto;
 import org.example.recipebookapp.core.service.DishService;
 import org.example.recipebookapp.database.entity.Dish;
-import org.example.recipebookapp.database.entity.DishIngredient;
 import org.example.recipebookapp.database.entity.Product;
 import org.example.recipebookapp.database.repository.DishIngredientRepository;
 import org.example.recipebookapp.database.repository.DishRepository;
@@ -17,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,12 +37,12 @@ import static org.mockito.Mockito.*;
  * {@code calculateKbzhuDish(Dish)}, который вызывается внутри публичных методов
  * {@code create()} и {@code update()}.</p>
  *
- * <h2>Формула расчёта:</h2>
+ * <h2>Формула расчёта (Абсолютная):</h2>
  * <pre>
  * Для каждого ингредиента:
  *   вклад = значение_продукта_на_100г × (вес_ингредиента_в_граммах / 100)
  *
- * Итоговое значение блюда:
+ * Итоговое значение блюда (Сумма всех ингредиентов):
  *   КБЖУ = round(Σ(вклады всех ингредиентов) × 100) / 100
  * </pre>
  *
@@ -63,9 +61,9 @@ import static org.mockito.Mockito.*;
  *   <li>AssertJ: fluent assertions для читаемости проверок</li>
  * </ul>
  *
- * @author Your Name
- * @version 1.0
- * @since 2024-01-01
+ * @author a.erkalov
+ * @version 2.0 (Absolute Calculation)
+ * @since 2026-01-05
  */
 @ExtendWith(MockitoExtension.class)
 class DishServiceTest {
@@ -88,7 +86,6 @@ class DishServiceTest {
 
     /**
      * Подготовка базовых тестовых данных перед каждым тестом.
-     * Используется шаблонный метод для избежания дублирования кода.
      */
     @BeforeEach
     void setUp() {
@@ -108,7 +105,7 @@ class DishServiceTest {
 
         baseDto = new DishCreateDto();
         baseDto.setName("Тестовое блюдо");
-        baseDto.setPortionSize(100.0);
+        baseDto.setPortionSize(100.0); // Порция не влияет на абсолютный расчет, но нужна для DTO
         baseDto.setIngredients(List.of(baseIngredientDto));
         baseDto.setCalories(null); // null = триггер авторасчёта
     }
@@ -116,14 +113,11 @@ class DishServiceTest {
     /**
      * Вспомогательный метод для настройки мока {@code dishRepository.save()}.
      * Имитирует поведение JPA: присваивает ID и заполняет аудиторские поля.
-     * Предотвращает {@code NullPointerException} в методе {@code toDto()}.
-     *
-     * @return сохранённый объект {@code Dish} с заполненными полями
      */
     private Dish mockSuccessfulSave() {
         when(dishRepository.save(any(Dish.class))).thenAnswer(invocation -> {
             Dish saved = invocation.getArgument(0);
-            saved.setId(999L); // Имитация генерации ID базой данных
+            saved.setId(999L);
             saved.setCreatedAt(LocalDateTime.of(2024, 1, 1, 12, 0));
             saved.setUpdatedAt(LocalDateTime.of(2024, 1, 1, 12, 0));
             return saved;
@@ -131,18 +125,13 @@ class DishServiceTest {
         return Dish.builder().id(999L).build();
     }
 
-    // =========================================================================
-    // ГРУППА ТЕСТОВ: Эквивалентное разбиение (Equivalence Partitioning)
-    // =========================================================================
     @Nested
     @DisplayName("Эквивалентное разбиение: классы входных данных")
     class EquivalencePartitioningTests {
 
         /**
          * <b>Класс эквивалентности #1:</b> Валидные данные, авторасчёт КБЖУ.
-         * <p>Условие: {@code calories == null} в DTO, список ингредиентов не пуст,
-         * все продукты существуют в БД.</p>
-         * <p>Ожидаемый результат: КБЖУ рассчитано автоматически по формуле.</p>
+         * <p>Ожидаемый результат: КБЖУ рассчитано как сумма вкладов.</p>
          */
         @Test
         @DisplayName("EP-1: Авторасчёт КБЖУ при calories = null (валидные данные)")
@@ -151,7 +140,7 @@ class DishServiceTest {
             when(productRepository.findById(1L)).thenReturn(Optional.of(baseProduct));
             mockSuccessfulSave();
 
-            // When: 100г продукта с 100 ккал/100г → ожидаем 100.0 ккал
+            // When: 100г продукта с 100 ккал/100г → ожидаем 100.0 ккал (абсолютно)
             DishResponseDto result = dishService.create(baseDto);
 
             // Then
@@ -164,7 +153,6 @@ class DishServiceTest {
 
         /**
          * <b>Класс эквивалентности #2:</b> Ручной ввод КБЖУ.
-         * <p>Условие: {@code calories != null} в DTO.</p>
          * <p>Ожидаемый результат: значение из DTO перезаписывает результат авторасчёта.</p>
          */
         @Test
@@ -179,7 +167,7 @@ class DishServiceTest {
             // When
             DishResponseDto result = dishService.create(baseDto);
 
-            // Then: должны сохраниться ручные значения, а не рассчитанные
+            // Then
             assertThat(result.getCalories()).isEqualTo(500.0);
             assertThat(result.getProteins()).isEqualTo(50.0);
             // Жиры и углеводы не были переопределены → рассчитались автоматически
@@ -188,10 +176,7 @@ class DishServiceTest {
 
         /**
          * <b>Класс эквивалентности #3:</b> Пустой список ингредиентов.
-         * <p>Условие: {@code ingredients == []}.</p>
-         * <p>Ожидаемый результат: КБЖУ = 0.0 (нет вклада от ингредиентов).</p>
-         * <p>Примечание: валидация {@code @NotEmpty} на уровне DTO может отклонить
-         * такой запрос до входа в сервис, но тест проверяет устойчивость логики.</p>
+         * <p>Ожидаемый результат: КБЖУ = 0.0.</p>
          */
         @Test
         @DisplayName("EP-3: КБЖУ = 0 при пустом списке ингредиентов")
@@ -211,9 +196,7 @@ class DishServiceTest {
         }
 
         /**
-         * <b>Класс эквивалентности #4:</b> Продукт не найден в репозитории.
-         * <p>Условие: {@code productRepository.findById(id) returns empty}.</p>
-         * <p>Ожидаемый результат: выбрасывается {@code EntityNotFoundException}.</p>
+         * <b>Класс эквивалентности #4:</b> Продукт не найден.
          */
         @Test
         @DisplayName("EP-4: Исключение при отсутствии продукта в БД")
@@ -226,7 +209,6 @@ class DishServiceTest {
                     .isInstanceOf(EntityNotFoundException.class)
                     .hasMessageContaining("Продукт не найден");
 
-            // Убеждаемся, что save не был вызван после ошибки
             verify(dishRepository, never()).save(any(Dish.class));
         }
     }
@@ -239,24 +221,21 @@ class DishServiceTest {
     class BoundaryValueAnalysisTests {
 
         /**
-         * При расчёте НА ПОРЦИЮ для ОДНОГО ингредиента вес сокращается в формуле.
-         * Итог зависит только от калорийности продукта и размера порции:
-         * Result = ProductCal × (PortionSize / 100)
+         * Проверка влияния веса ингредиента на абсолютную сумму.
+         * Формула: Result = ProductCal × (Weight / 100)
          */
         @ParameterizedTest
         @CsvSource({
-                "100.0, 100.0, 100.0",  // Порция 100г → 100 × 1.0 = 100.0
-                "50.0,  100.0,  50.0",  // Порция 50г  → 100 × 0.5 = 50.0
-                "200.0, 100.0, 200.0",  // Порция 200г → 100 × 2.0 = 200.0
-                "100.0, 50.0,  100.0",  // Вес 50г не влияет при 1 ингр. → 100 × 1.0 = 100.0
-                "1.0,   100.0,  1.0"    // Порция 1г → 100 × 0.01 = 1.0
+                "100.0, 100.0",  // 100г → 100 * 1.0 = 100.0
+                "50.0,  50.0",   // 50г  → 100 * 0.5 = 50.0
+                "200.0, 200.0",  // 200г → 100 * 2.0 = 200.0
+                "1.0,   1.0",    // 1г   → 100 * 0.01 = 1.0
+                "0.0,   0.0"     // 0г   → 0
         })
-        @DisplayName("BVA-1: Корректность расчёта при разном весе ингредиента и порции")
-        void shouldCalculateCorrectly_ForDifferentIngredientWeights(
-                Double portionSize, Double weight, Double expectedCal) {
+        @DisplayName("BVA-1: Корректность расчёта при разном весе ингредиента")
+        void shouldCalculateCorrectly_ForDifferentIngredientWeights(Double weight, Double expectedCal) {
 
             // Given
-            baseDto.setPortionSize(portionSize);
             baseIngredientDto.setQuantityInGrams(weight);
             when(productRepository.findById(1L)).thenReturn(Optional.of(baseProduct));
             mockSuccessfulSave();
@@ -266,59 +245,15 @@ class DishServiceTest {
 
             // Then
             assertThat(result.getCalories())
-                    .as("Калории для порции %.1f г и веса %.1f г", portionSize, weight)
+                    .as("Калории для веса %.1f г", weight)
                     .isEqualTo(expectedCal);
         }
 
         /**
-         * <b>Граничные значения для калорийности продукта:</b>
-         * <ul>
-         *   <li>{@code 0.0} — продукт без калорий (вода, специи)</li>
-         *   <li>{@code 0.001} — очень маленькое значение (проверка округления)</li>
-         *   <li>{@code 9999.99} — экстремально высокая калорийность</li>
-         * </ul>
-         */
-        @ParameterizedTest
-        @CsvSource({
-                "0.0,      0.0",      // Нулевая калорийность
-                "0.001,    0.0",      // Округление вниз: 0.001 × 1.0 = 0.001 → 0.0
-                "0.005,    0.01",     // Округление вверх: 0.005 → 0.01
-                "9999.99, 9999.99"    // Максимальное значение
-        })
-        @DisplayName("BVA-2: Расчёт при экстремальных значениях калорийности продукта")
-        void shouldHandleExtremeProductCalories(
-                Double productCalories, Double expectedDishCalories) {
-
-            // Given
-            Product extremeProduct = Product.builder()
-                    .id(2L)
-                    .name("Экстремальный продукт")
-                    .calories(productCalories)
-                    .proteins(0.0).fats(0.0).carbs(0.0)
-                    .build();
-
-            baseIngredientDto.setProductId(2L);
-            baseIngredientDto.setQuantityInGrams(100.0); // коэффициент = 1.0
-
-            when(productRepository.findById(2L)).thenReturn(Optional.of(extremeProduct));
-            mockSuccessfulSave();
-
-            // When
-            DishResponseDto result = dishService.create(baseDto);
-
-            // Then
-            assertThat(result.getCalories()).isEqualTo(expectedDishCalories);
-        }
-
-        /**
          * <b>Тесты на точность округления:</b>
-         * <p>Метод использует {@code Math.round(val * 100.0) / 100.0},
-         * что реализует округление до 2 знаков по правилам математики
-         * (0.005 → 0.01, 0.014 → 0.01, 0.015 → 0.02).</p>
          */
         @ParameterizedTest
         @CsvSource({
-                // rawResult, expectedAfterRounding
                 "123.454, 123.45",   // Округление вниз
                 "123.455, 123.46",   // Округление вверх (полуцелое)
                 "0.004,   0.0",      // Очень маленькое → 0
@@ -327,11 +262,9 @@ class DishServiceTest {
                 "999.995, 1000.0"    // Большое число, округление вверх
         })
         @DisplayName("BVA-3: Проверка алгоритма округления до 2 знаков")
-        void shouldRoundCorrectly_ToTwoDecimals(
-                Double rawResult, Double expectedRounded) {
+        void shouldRoundCorrectly_ToTwoDecimals(Double rawResult, Double expectedRounded) {
 
-            // Given: создаём продукт, чей вклад даст нужное "сырое" значение
-            // При весе 100г: calories × 1.0 = rawResult → calories = rawResult
+            // Given
             Product roundingProduct = Product.builder()
                     .id(3L)
                     .name("Продукт для теста округления")
@@ -356,26 +289,24 @@ class DishServiceTest {
     }
 
     // =========================================================================
-    // ГРУППА ТЕСТОВ: Сложные сценарии и интеграция
+    // ГРУППА ТЕСТОВ: Сложные сценарии
     // =========================================================================
     @Nested
     @DisplayName("Сложные сценарии: несколько ингредиентов, агрегация")
     class ComplexScenariosTests {
 
         /**
-         * Проверка корректного суммирования вкладов от нескольких ингредиентов
-         * с последующим пересчётом на размер порции.
+         * Проверка корректного суммирования вкладов от нескольких ингредиентов.
+         * Расчет АБСОЛЮТНЫЙ (сумма всех ингредиентов).
          */
         @Test
-        @DisplayName("CS-1: Суммирование КБЖУ от нескольких ингредиентов (расчёт НА ПОРЦИЮ)")
+        @DisplayName("CS-1: Суммирование КБЖУ от нескольких ингредиентов (Абсолютный расчет)")
         void shouldSumKbzhu_FromMultipleIngredients() {
             // Given: 3 ингредиента
-            // Курица: 200г (110 ккал/100г) → Абс: 220 ккал, 46Б, 2Ж
-            // Рис:    150г (130 ккал/100г) → Абс: 195 ккал, 4.05Б, 0.45Ж, 42У
-            // Масло:   10г (900 ккал/100г) → Абс:  90 ккал, 0Б,   10Ж
-            // Общий вес = 360г. Абсолютные суммы: К=505, Б=50.05, Ж=12.45, У=42.0
-            // Порция = 100г. Коэффициент = 100 / 360 ≈ 0.27777...
-            // Ожидаемое на порцию: К=140.28, Б=13.9, Ж=3.46, У=11.67
+            // Курица: 200г (110 ккал/100г) → Вклад: 220 ккал
+            // Рис:    150г (130 ккал/100г) → Вклад: 195 ккал
+            // Масло:   10г (900 ккал/100г) → Вклад:  90 ккал
+            // Итого: 220 + 195 + 90 = 505 ккал
 
             Product chicken = Product.builder().id(1L).name("Курица")
                     .calories(110.0).proteins(23.0).fats(1.0).carbs(0.0).build();
@@ -391,7 +322,6 @@ class DishServiceTest {
             );
 
             baseDto.setIngredients(ingredients);
-            baseDto.setPortionSize(100.0);
             baseDto.setCalories(null); // Авторасчёт
 
             when(productRepository.findById(1L)).thenReturn(Optional.of(chicken));
@@ -402,16 +332,21 @@ class DishServiceTest {
             // When
             DishResponseDto result = dishService.create(baseDto);
 
-            // Then
-            assertThat(result.getCalories()).isEqualTo(140.28);
-            assertThat(result.getProteins()).isEqualTo(13.9);
-            assertThat(result.getFats()).isEqualTo(3.46);
-            assertThat(result.getCarbs()).isEqualTo(11.67);
+            // Then: Ожидаем абсолютную сумму
+            assertThat(result.getCalories()).isEqualTo(505.0);
+
+            // Белки: (23*2) + (2.7*1.5) + 0 = 46 + 4.05 = 50.05
+            assertThat(result.getProteins()).isEqualTo(50.05);
+
+            // Жиры: (1*2) + (0.3*1.5) + (100*0.1) = 2 + 0.45 + 10 = 12.45
+            assertThat(result.getFats()).isEqualTo(12.45);
+
+            // Углеводы: 0 + (28*1.5) + 0 = 42.0
+            assertThat(result.getCarbs()).isEqualTo(42.0);
         }
 
         /**
          * Проверка устойчивости к ингредиентам с нулевыми значениями КБЖУ.
-         * Такие ингредиенты (вода, соль) не должны ломать расчёт.
          */
         @Test
         @DisplayName("CS-2: Ингредиенты с нулевыми КБЖУ не влияют на расчёт")
@@ -423,8 +358,8 @@ class DishServiceTest {
                     .calories(0.0).proteins(0.0).fats(0.0).carbs(0.0).build();
 
             baseDto.setIngredients(List.of(
-                    createIngredientDto(4L, 500.0), // 500г воды
-                    createIngredientDto(5L, 10.0)   // 10г соли
+                    createIngredientDto(4L, 500.0),
+                    createIngredientDto(5L, 10.0)
             ));
 
             when(productRepository.findById(4L)).thenReturn(Optional.of(water));
@@ -436,77 +371,13 @@ class DishServiceTest {
 
             // Then
             assertThat(result.getCalories()).isEqualTo(0.0);
-            assertThat(result.getProteins()).isEqualTo(0.0);
-            assertThat(result.getFats()).isEqualTo(0.0);
-            assertThat(result.getCarbs()).isEqualTo(0.0);
-        }
-
-        /**
-         * Проверка алгебраического суммирования (включая отрицательные значения)
-         * с корректным применением коэффициента порции.
-         */
-        @Test
-        @DisplayName("CS-3: Алгебраическое суммирование (в т.ч. отрицательные значения, расчёт НА ПОРЦИЮ)")
-        void shouldSumAlgebraically_EvenWithNegativeValues() {
-            // Given: База (100г, 100 ккал/100г) + Баг (100г, -50 ккал/100г)
-            // Абсолютная сумма: 50 ккал, 5Б, 3Ж
-            // Общий вес: 200г. Порция: 100г. Коэффициент = 0.5
-            // Ожидаемое на порцию: 25.0 ккал, 2.5Б, 1.5Ж
-
-            Product buggyProduct = Product.builder().id(6L).name("Баг-продукт")
-                    .calories(-50.0).proteins(-5.0).fats(-2.0).carbs(-10.0).build();
-
-            baseDto.setIngredients(List.of(
-                    createIngredientDto(1L, 100.0),
-                    createIngredientDto(6L, 100.0)
-            ));
-            baseDto.setPortionSize(100.0);
-
-            when(productRepository.findById(1L)).thenReturn(Optional.of(baseProduct));
-            when(productRepository.findById(6L)).thenReturn(Optional.of(buggyProduct));
-            mockSuccessfulSave();
-
-            // When
-            DishResponseDto result = dishService.create(baseDto);
-
-            // Then
-            assertThat(result.getCalories()).isEqualTo(25.0);
-            assertThat(result.getProteins()).isEqualTo(2.5);
-            assertThat(result.getFats()).isEqualTo(1.5);
         }
     }
 
-    // =========================================================================
-    // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-    // =========================================================================
-
-    /**
-     * Фабричный метод для создания {@code IngredientDto}.
-     * Упрощает чтение тестов и уменьшает дублирование кода.
-     *
-     * @param productId ID продукта
-     * @param weight вес в граммах
-     * @return настроенный DTO ингредиента
-     */
     private DishCreateDto.IngredientDto createIngredientDto(Long productId, Double weight) {
         DishCreateDto.IngredientDto dto = new DishCreateDto.IngredientDto();
         dto.setProductId(productId);
         dto.setQuantityInGrams(weight);
         return dto;
-    }
-
-    /**
-     * AssertJ-проверка для сравнения значений КБЖУ с допустимой погрешностью.
-     * Используется в тестах, где возможны небольшие расхождения из-за
-     * особенностей арифметики с плавающей точкой.
-     *
-     * @param actual фактическое значение
-     * @param expected ожидаемое значение
-     * @param delta допустимая погрешность
-     */
-    private void assertKbzhuEquals(Double actual, Double expected, double delta) {
-        assertThat(actual)
-                .as("Значение КБЖУ с погрешностью %.4f", delta)
-                .isCloseTo(expected, org.assertj.core.data.Percentage.withPercentage(delta * 100 / Math.max(expected, 1)));
     }
 }

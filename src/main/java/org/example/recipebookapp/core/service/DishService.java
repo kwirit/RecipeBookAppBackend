@@ -82,11 +82,12 @@ public class DishService {
 
     private void calculateKbzhuDish(Dish dish) {
         double totalCal = 0, totalProt = 0, totalFat = 0, totalCarb = 0;
-        double totalWeight = 0;
 
-        // 1. Считаем абсолютные значения и общий вес всех ингредиентов
+        // Считаем абсолютные значения (сумма вкладов всех ингредиентов)
         for (DishIngredient ing : dish.getIngredients()) {
             Product p = ing.getProduct();
+            if (p == null) continue; // Защита от null-продукта
+
             double weight = ing.getQuantityInGrams();
             double ratio = weight / 100.0;
 
@@ -94,27 +95,14 @@ public class DishService {
             totalProt += p.getProteins() * ratio;
             totalFat += p.getFats() * ratio;
             totalCarb += p.getCarbs() * ratio;
-            totalWeight += weight;
         }
 
-        Double portionSize = dish.getPortionSize();
-
-        // 2. Рассчитываем КБЖУ на порцию
-        // Формула: (Абсолютное значение / Общий вес ингредиентов) * Размер порции
-        if (totalWeight > 0 && portionSize != null && portionSize > 0) {
-            double portionFactor = portionSize / totalWeight;
-
-            dish.setCalories(Math.round(totalCal * portionFactor * 100.0) / 100.0);
-            dish.setProteins(Math.round(totalProt * portionFactor * 100.0) / 100.0);
-            dish.setFats(Math.round(totalFat * portionFactor * 100.0) / 100.0);
-            dish.setCarbs(Math.round(totalCarb * portionFactor * 100.0) / 100.0);
-        } else {
-            // Защита от деления на ноль или некорректной порции
-            dish.setCalories(0.0);
-            dish.setProteins(0.0);
-            dish.setFats(0.0);
-            dish.setCarbs(0.0);
-        }
+        // Устанавливаем абсолютные значения в блюдо
+        // Округляем до 2 знаков после запятой
+        dish.setCalories(Math.round(totalCal * 100.0) / 100.0);
+        dish.setProteins(Math.round(totalProt * 100.0) / 100.0);
+        dish.setFats(Math.round(totalFat * 100.0) / 100.0);
+        dish.setCarbs(Math.round(totalCarb * 100.0) / 100.0);
     }
 
     private DishResponseDto toDto(Dish d) {
@@ -167,7 +155,7 @@ public class DishService {
                     .quantityInGrams(iDto.getQuantityInGrams())
                     .build();
 
-            dish.addIngredient(ingredient);  // ✅ ingredient.setDish(dish) вызывается внутри
+            dish.addIngredient(ingredient);
         }
 
         calculateKbzhuDish(dish);
